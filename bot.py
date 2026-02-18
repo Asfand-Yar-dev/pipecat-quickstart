@@ -1,24 +1,3 @@
-#
-# Copyright (c) 2024-2026, Daily
-#
-# SPDX-License-Identifier: BSD 2-Clause License
-#
-
-"""Pipecat Quickstart Example.
-
-The example runs a simple voice AI bot that you can connect to using your
-browser and speak with it. You can also deploy this bot to Pipecat Cloud.
-
-Required AI services:
-- Deepgram (Speech-to-Text)
-- OpenAI (LLM)
-- Cartesia (Text-to-Speech)
-
-Run the bot using::
-
-    uv run bot.py
-"""
-
 import os
 
 from dotenv import load_dotenv
@@ -49,12 +28,9 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.daily.transport import DailyParams
 
 logger.info("✅ All components loaded successfully!")
-
 load_dotenv(override=True)
-
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
@@ -63,16 +39,15 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        voice_id="6ccbfb76-1fc6-48f7-b71d-91ac6298247b",  # British Reading Lady
     )
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
-
+    llm = OpenAILLMService(api_key="not-needed",base_url = os.getenv("LM_STUDIO_BASE_URL"), model=os.getenv("MODEL_NAME"),max_tokens=2048)
     messages = [
         {
             "role": "system",
-            "content": "You are a friendly AI assistant. Respond naturally and keep your answers conversational.",
-        },
+            "content": "[Instructions: You are a friendly AI assistant. Respond naturally and keep your answers conversational.]",
+        }
     ]
 
     context = LLMContext(messages)
@@ -105,7 +80,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        messages.append({"role": "system", "content": "Say hello and briefly introduce yourself."})
+        messages.append({"role": "user", "content": "Say hello and briefly introduce yourself."})
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
@@ -122,16 +97,12 @@ async def bot(runner_args: RunnerArguments):
     """Main bot entry point for the bot starter."""
 
     transport_params = {
-        "daily": lambda: DailyParams(
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-        ),
         "webrtc": lambda: TransportParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
         ),
     }
-
+    # Only add Daily transport if available (not on Windows)
     transport = await create_transport(runner_args, transport_params)
 
     await run_bot(transport, runner_args)
