@@ -1,76 +1,180 @@
-# Pipecat Quickstart
+# Pipecat RAG Voice Bot
 
-Build and deploy your first voice AI bot in under 10 minutes. Develop locally, then scale to production on Pipecat Cloud.
+A **Retrieval-Augmented Generation (RAG)** voice AI bot built with [Pipecat](https://github.com/pipecat-ai/pipecat). Users speak naturally into their browser, and the bot answers questions grounded in the contents of a PDF or DOCX document — all in real time.
 
-**Two steps**: [🏠 Local Development](#run-your-bot-locally) → [☁️ Production Deployment](#deploy-to-production)
+---
 
-## Step 1: Local Development (5 min)
+## Table of Contents
 
-### Prerequisites
+- [Introduction](#introduction)
+- [How It Works](#how-it-works)
+- [Architecture](#architecture)
+- [Requirements](#requirements)
+- [Environment Configuration](#environment-configuration)
+- [How to Run](#how-to-run)
+- [Deploy to Production](#deploy-to-production)
 
-#### Environment
+---
 
-- Python 3.10 or later
-- [uv](https://docs.astral.sh/uv/getting-started/installation/) package manager installed
+## Introduction
 
-#### AI Service API keys
+This project is a voice-powered question-answering assistant. Instead of relying on the LLM's pre-trained knowledge, it retrieves relevant passages from a user-supplied document (PDF or DOCX) and uses them as context when generating answers. This ensures responses are accurate, grounded, and traceable back to source material.
 
-You'll need API keys from three services:
+Key capabilities:
 
-- [Deepgram](https://console.deepgram.com/signup) for Speech-to-Text
-- [OpenAI](https://auth.openai.com/create-account) for LLM inference
-- [Cartesia](https://play.cartesia.ai/sign-up) for Text-to-Speech
+- **Voice-in, voice-out** — speak your question and hear the answer.
+- **Document-grounded answers** — the bot only responds based on your uploaded document.
+- **Interview question generation** — ask for interview questions derived from a resume or any document.
+- **Local LLM support** — runs inference through [LM Studio](https://lmstudio.ai/) so no data leaves your machine.
 
-> 💡 **Tip**: Sign up for all three now. You'll need them for both local and cloud deployment.
+---
 
-### Setup
+## How It Works
 
-Navigate to the quickstart directory and set up your environment.
+```
+┌──────────┐    audio    ┌────────────┐   text    ┌───────────┐
+│  Browser  │ ────────► │ Deepgram   │ ───────► │  RAG      │
+│  (WebRTC) │           │ STT        │          │  Retriever│
+└──────────┘           └────────────┘          └─────┬─────┘
+      ▲                                              │ context + query
+      │ audio                                        ▼
+┌──────────┐           ┌────────────┐          ┌───────────┐
+│ Cartesia │ ◄──────── │  LLM       │ ◄─────── │  Prompt   │
+│ TTS      │   text    │ (LM Studio)│          │  Builder  │
+└──────────┘           └────────────┘          └───────────┘
+```
 
-1. Clone this repository
+1. **Speech-to-Text** — Deepgram transcribes the user's spoken question in real time.
+2. **Retrieval** — The query is embedded using `all-MiniLM-L6-v2` and compared against pre-computed document chunk embeddings via cosine similarity. The top-k most relevant chunks are selected.
+3. **Augmented Prompt** — Retrieved chunks are injected into the system prompt alongside the user's question.
+4. **LLM Inference** — The augmented prompt is sent to a local LLM served by LM Studio (OpenAI-compatible API).
+5. **Text-to-Speech** — Cartesia converts the LLM's response into natural-sounding audio streamed back to the browser.
 
-   ```bash
-   git clone https://github.com/pipecat-ai/pipecat-quickstart.git
-   cd pipecat-quickstart
-   ```
+---
 
-2. Configure your API keys:
+## Architecture
 
-   Create a `.env` file:
+| Component        | Technology                                 | Purpose                                                 |
+| ---------------- | ------------------------------------------ | ------------------------------------------------------- |
+| Transport        | Pipecat WebRTC                             | Real-time browser ↔ server audio streaming              |
+| STT              | Deepgram                                   | Converts speech to text                                 |
+| Embeddings       | Sentence-Transformers (`all-MiniLM-L6-v2`) | Encodes document chunks & queries for similarity search |
+| Document Parsing | PyMuPDF / python-docx                      | Extracts text from PDF and DOCX files                   |
+| LLM              | LM Studio (OpenAI-compatible)              | Generates answers from augmented context                |
+| TTS              | Cartesia                                   | Converts text responses to speech                       |
+| VAD              | Silero                                     | Voice Activity Detection for turn-taking                |
+
+---
+
+## Requirements
+
+### System
+
+- **Python** 3.10 or later
+- **[uv](https://docs.astral.sh/uv/getting-started/installation/)** package manager
+- **[LM Studio](https://lmstudio.ai/)** installed and running with a loaded model
+- A PDF or DOCX document to use as the knowledge base
+
+### API Keys
+
+| Service  | Purpose        | Sign-up Link                                                |
+| -------- | -------------- | ----------------------------------------------------------- |
+| Deepgram | Speech-to-Text | [console.deepgram.com](https://console.deepgram.com/signup) |
+| Cartesia | Text-to-Speech | [play.cartesia.ai](https://play.cartesia.ai/sign-up)        |
+
+> **Note:** No OpenAI API key is required. LLM inference runs locally through LM Studio.
+
+### Python Dependencies
+
+Core dependencies are declared in `pyproject.toml`:
+
+```
+pipecat-ai[webrtc,daily,silero,deepgram,openai,cartesia,runner]
+pipecat-ai-cli
+```
+
+Additional libraries used at runtime:
+
+```
+PyMuPDF          # PDF text extraction
+python-docx      # DOCX text extraction
+sentence-transformers  # Embedding model
+numpy            # Similarity computation
+python-dotenv    # .env file loading
+loguru           # Logging
+```
+
+---
+
+## Environment Configuration
+
+1. **Copy the example file** to create your local `.env`:
 
    ```bash
    cp env.example .env
    ```
 
-   Then, add your API keys:
+2. **Edit `.env`** and fill in each variable:
 
    ```ini
-   DEEPGRAM_API_KEY=your_deepgram_api_key
-   OPENAI_API_KEY=your_openai_api_key
-   CARTESIA_API_KEY=your_cartesia_api_key
+   # ── Speech-to-Text ─────────────────────────────────────
+   DEEPGRAM_API_KEY=your_deepgram_api_key_here
+
+   # ── LLM (not used — inference is local via LM Studio) ──
+   OPENAI_API_KEY=your_openai_api_key_here
+
+   # ── Text-to-Speech ─────────────────────────────────────
+   CARTESIA_API_KEY=your_cartesia_api_key_here
+
+   # ── LM Studio local server ─────────────────────────────
+   LM_STUDIO_BASE_URL=http://localhost:1234/v1
+   MODEL_NAME=your_model_name_here
    ```
 
-3. Set up a virtual environment and install dependencies
+   | Variable             | Description                                                                          |
+   | -------------------- | ------------------------------------------------------------------------------------ |
+   | `DEEPGRAM_API_KEY`   | Your Deepgram API key for real-time speech recognition.                              |
+   | `OPENAI_API_KEY`     | Placeholder — can be any value (e.g., `not-needed`) since the LLM is local.          |
+   | `CARTESIA_API_KEY`   | Your Cartesia API key for text-to-speech synthesis.                                  |
+   | `LM_STUDIO_BASE_URL` | URL where LM Studio's local server is running (default: `http://localhost:1234/v1`). |
+   | `MODEL_NAME`         | The exact model identifier loaded in LM Studio (e.g., `mistral-7b-instruct`).        |
 
-   ```bash
-   uv sync
+3. **Place your document** in the project root. By default the bot loads `Resume_BD.pdf`. To change this, edit the `doc_file` variable in `bot.py`:
+
+   ```python
+   doc_file = "your_document.pdf"  # or "your_document.docx"
    ```
 
-### Run your bot locally
+---
+
+## How to Run
+
+### 1. Start LM Studio
+
+- Open LM Studio and load your preferred model.
+- Start the local server (default: `http://localhost:1234/v1`).
+
+### 2. Install Dependencies
+
+```bash
+uv sync
+```
+
+### 3. Launch the Bot
 
 ```bash
 uv run bot.py
 ```
 
-**Open http://localhost:7860 in your browser** and click `Connect` to start talking to your bot.
+### 4. Connect from Browser
 
-> 💡 First run note: The initial startup may take ~20 seconds as Pipecat downloads required models and imports.
+Open **http://localhost:7860** and click **Connect** to begin the voice conversation.
 
-🎉 **Success!** Your bot is running locally. Now let's deploy it to production so others can use it.
+> **First run:** Initial startup may take ~20–30 seconds while Pipecat downloads the Silero VAD model and `all-MiniLM-L6-v2` embeddings.
 
 ---
 
-## Step 2: Deploy to Production (5 min)
+## Deploy to Production
 
 Transform your local bot into a production-ready service. Pipecat Cloud handles scaling, monitoring, and global deployment.
 
@@ -79,7 +183,6 @@ Transform your local bot into a production-ready service. Pipecat Cloud handles 
 1. [Sign up for Pipecat Cloud](https://pipecat.daily.co/sign-up).
 
 2. Set up Docker for building your bot image:
-
    - **Install [Docker](https://www.docker.com/)** on your system
    - **Create a [Docker Hub](https://hub.docker.com/) account**
    - **Login to Docker Hub:**
